@@ -2,7 +2,7 @@
 
 MixPrecHLS: A High-Level Synthesis Framework for Mixed-Precision Computing.
 
-It is important to note that MixPrecHLS is made based on ScaleHLS.
+It is important to note that MixPrecHLS is made based on [ScaleHLS](https://github.com/UIUC-ChenLab/ScaleHLS-HIDA.git).
 
 ## Setting this up
 
