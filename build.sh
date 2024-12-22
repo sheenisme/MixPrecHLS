@@ -38,7 +38,7 @@ cd build
 # Configure CMake.
 if [ ! -f "CMakeCache.txt" ]; then
   cmake -G "${CMAKE_GENERATOR}" \
-    ../polygeist/llvm-project/llvm \
+    ${SCALEHLS_DIR}/polygeist/llvm-project/llvm \
     -DLLVM_ENABLE_PROJECTS="mlir;clang" \
     -DLLVM_EXTERNAL_PROJECTS="scalehls" \
     -DLLVM_EXTERNAL_SCALEHLS_SOURCE_DIR="${SCALEHLS_DIR}" \
@@ -72,7 +72,7 @@ cd build
 # Configure CMake.
 if [ ! -f "CMakeCache.txt" ]; then
   cmake -G "${CMAKE_GENERATOR}" \
-    .. \
+    ${SCALEHLS_DIR}/polygeist \
     -DMLIR_DIR="${SCALEHLS_DIR}/build/lib/cmake/mlir" \
     -DCLANG_DIR="${SCALEHLS_DIR}/build/lib/cmake/clang" \
     -DLLVM_ENABLE_ASSERTIONS=ON \

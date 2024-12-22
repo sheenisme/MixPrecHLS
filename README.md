@@ -25,7 +25,7 @@ $ cd mixprechls
 ### Build MixPrecHLS
 Run the following script to build MixPrecHLS. Optionally, add `-p ON` to enable the Python binding and `-j xx` to specify the number of parallel linking jobs.
 ```sh
-$ ./build-mixprechls.sh
+$ ./build.sh
 ```
 
 After the build, we suggest to export the following paths.
