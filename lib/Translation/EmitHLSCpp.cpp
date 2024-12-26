@@ -940,6 +940,18 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
     }
   }
 
+  // Declear all init values.
+  for (auto init : op.getInits()) {
+    if (!isDeclared(init)) {
+      indent();
+      if (init.getType().isa<MemRefType>())
+        emitArrayDecl(init);
+      else
+        emitValue(init);
+      os << ";\n";
+    }
+  }
+
   auto iterOperands = op.getBeforeArguments();
   auto initOperands = op.getInits();
 
@@ -956,12 +968,8 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
   auto condArgs = condOp.getArgs();
   for (unsigned i = 0; i < iterOperands.size(); ++i) {
     if (!isDeclared(initOperands[i])) {
-      indent();
-      if (initOperands[i].getType().isa<MemRefType>())
-        emitArrayDecl(initOperands[i]);
-      else
-        emitValue(initOperands[i]);
-      os << ";\n";
+      emitError(op, "OP initOperands[i] not declared!.");
+      break;
     }
     indent();
     emitValue(condArgs[i]);
@@ -1030,6 +1038,18 @@ void ModuleEmitter::emitScfFor(scf::ForOp op) {
     }
   }
 
+  // Declear all init values.
+  for (auto init : op.getIterOperands()) {
+    if (!isDeclared(init)) {
+      indent();
+      if (init.getType().isa<MemRefType>())
+        emitArrayDecl(init);
+      else
+        emitValue(init);
+      os << ";\n";
+    }
+  }
+
   indent() << "for (";
   auto iterVar = op.getInductionVar();
 
@@ -1062,12 +1082,8 @@ void ModuleEmitter::emitScfFor(scf::ForOp op) {
       auto iterOperand = op.getIterOperands()[i];
       auto iterResult = op.getRegionIterArgs()[i];
       if (!isDeclared(iterOperand)) {
-        indent();
-        if (iterOperand.getType().isa<MemRefType>())
-          emitArrayDecl(iterOperand);
-        else
-          emitValue(iterOperand);
-        os << ";\n";
+        emitError(op, "OP initOperands[i] not declared!.");
+        break;
       }
       indent();
       emitValue(iterResult);
