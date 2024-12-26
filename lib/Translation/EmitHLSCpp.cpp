@@ -927,6 +927,19 @@ void ModuleEmitter::emitCall(func::CallOp op) {
 
 /// SCF statement emitters.
 void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
+  // Declare all values returned by scf::YieldOp. They will be further handled
+  // by the scf::YieldOp emitter.
+  for (auto result : op.getResults()) {
+    if (!isDeclared(result)) {
+      indent();
+      if (result.getType().isa<MemRefType>())
+        emitArrayDecl(result);
+      else
+        emitValue(result);
+      os << ";\n";
+    }
+  }
+
   auto iterOperands = op.getBeforeArguments();
   auto initOperands = op.getInits();
 
@@ -1005,6 +1018,18 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
 }
 
 void ModuleEmitter::emitScfFor(scf::ForOp op) {
+  // Declare all values returned by scf::YieldOp.
+  for (auto result : op.getResults()) {
+    if (!isDeclared(result)) {
+      indent();
+      if (result.getType().isa<MemRefType>())
+        emitArrayDecl(result);
+      else
+        emitValue(result);
+      os << ";\n";
+    }
+  }
+
   indent() << "for (";
   auto iterVar = op.getInductionVar();
 
@@ -1101,6 +1126,38 @@ void ModuleEmitter::emitScfYield(scf::YieldOp op) {
   if (auto parentOp = dyn_cast<scf::IfOp>(op->getParentOp())) {
     unsigned resultIdx = 0;
     for (auto result : parentOp.getResults()) {
+      unsigned rank = emitNestedLoopHeader(result);
+      indent();
+      emitValue(result, rank);
+      os << " = ";
+      emitValue(op.getOperand(resultIdx++), rank);
+      os << ";";
+      emitInfoAndNewLine(op);
+      emitNestedLoopFooter(rank);
+    }
+  }
+
+  if (auto parentOp = dyn_cast<scf::ForOp>(op->getParentOp())) {
+    unsigned resultIdx = 0;
+    for (auto result : parentOp.getResults()) {
+      unsigned rank = emitNestedLoopHeader(result);
+      indent();
+      emitValue(result, rank);
+      os << " = ";
+      emitValue(op.getOperand(resultIdx++), rank);
+      os << ";";
+      emitInfoAndNewLine(op);
+      emitNestedLoopFooter(rank);
+    }
+  }
+
+  if (auto parentOp = dyn_cast<scf::WhileOp>(op->getParentOp())) {
+    unsigned resultIdx = 0;
+    for (auto result : parentOp.getResults()) {
+      if (resultIdx >= op.getNumOperands()) {
+        break;
+      }
+
       unsigned rank = emitNestedLoopHeader(result);
       indent();
       emitValue(result, rank);
@@ -1968,6 +2025,15 @@ void ModuleEmitter::emitInfoAndNewLine(Operation *op) {
 /// MLIR component and HLS C++ pragma emitters.
 void ModuleEmitter::emitBlock(Block &block) {
   for (auto &op : block) {
+    // 确保操作数已声明
+    for (auto val : op.getOperands()) {
+      if (!isDeclared(val)) {
+        indent();
+        emitValue(val); // 声明变量
+        os << ";\n";
+      }
+    }
+  
     if (ExprVisitor(*this).dispatchVisitor(&op))
       continue;
 
