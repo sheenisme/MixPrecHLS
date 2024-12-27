@@ -952,6 +952,28 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
     }
   }
 
+  for (auto init : op.getBeforeArguments()) {
+    if (!isDeclared(init)) {
+      indent();
+      if (init.getType().isa<MemRefType>())
+        emitArrayDecl(init);
+      else
+        emitValue(init);
+      os << ";\n";
+    }
+  }
+
+  for (auto init : op.getAfterArguments()) {
+    if (!isDeclared(init)) {
+      indent();
+      if (init.getType().isa<MemRefType>())
+        emitArrayDecl(init);
+      else
+        emitValue(init);
+      os << ";\n";
+    }
+  }
+
   auto iterOperands = op.getBeforeArguments();
   auto initOperands = op.getInits();
 
