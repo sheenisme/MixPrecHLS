@@ -1049,26 +1049,35 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
 
 void ModuleEmitter::emitScfFor(scf::ForOp op) {
   // Declare all values returned by scf::YieldOp.
-  for (auto result : op.getResults()) {
-    if (!isDeclared(result)) {
-      indent();
-      if (result.getType().isa<MemRefType>())
-        emitArrayDecl(result);
-      else
-        emitValue(result);
-      os << ";\n";
+  if (op.getNumResults() != 0) {
+    for (auto result : op.getResults()) {
+      if (!isDeclared(result)) {
+        indent();
+        if (result.getType().isa<MemRefType>())
+          emitArrayDecl(result);
+        else
+          emitValue(result);
+        os << "; // yield value \n";
+      }
     }
   }
 
-  // Declear all init values.
-  for (auto init : op.getIterOperands()) {
-    if (!isDeclared(init)) {
+  // Handle iter_args if present.
+  if (!op.getIterOperands().empty()) {
+    for (unsigned i = 0; i < op.getIterOperands().size(); ++i) {
+      auto iterResult = op.getRegionIterArgs()[i];
+      auto iterOperand = op.getIterOperands()[i];
+
+      if (!isDeclared(iterOperand)) {
+        emitError(op, "OP initOperands[i] not declared!.");
+        break;
+      }
       indent();
-      if (init.getType().isa<MemRefType>())
-        emitArrayDecl(init);
-      else
-        emitValue(init);
-      os << ";\n";
+      emitValue(iterResult);
+      os << " = ";
+      emitValue(iterOperand);
+      os << ";";
+      emitInfoAndNewLine(op);
     }
   }
 
@@ -1097,24 +1106,6 @@ void ModuleEmitter::emitScfFor(scf::ForOp op) {
   addIndent();
 
   emitLoopDirectives(op);
-
-  // Handle iter_args if present.
-  if (!op.getIterOperands().empty()) {
-    for (unsigned i = 0; i < op.getIterOperands().size(); ++i) {
-      auto iterOperand = op.getIterOperands()[i];
-      auto iterResult = op.getRegionIterArgs()[i];
-      if (!isDeclared(iterOperand)) {
-        emitError(op, "OP initOperands[i] not declared!.");
-        break;
-      }
-      indent();
-      emitValue(iterResult);
-      os << " = ";
-      emitValue(iterOperand);
-      os << ";";
-      emitInfoAndNewLine(op);
-    }
-  }
 
   emitBlock(*op.getBody());
   reduceIndent();
@@ -1176,34 +1167,47 @@ void ModuleEmitter::emitScfYield(scf::YieldOp op) {
   }
 
   if (auto parentOp = dyn_cast<scf::ForOp>(op->getParentOp())) {
-    unsigned resultIdx = 0;
-    for (auto result : parentOp.getResults()) {
-      unsigned rank = emitNestedLoopHeader(result);
-      indent();
-      emitValue(result, rank);
-      os << " = ";
-      emitValue(op.getOperand(resultIdx++), rank);
-      os << ";";
-      emitInfoAndNewLine(op);
-      emitNestedLoopFooter(rank);
+    if (parentOp.getNumResults() != 0) {
+      unsigned resultIdx = 0;
+      for (auto result : parentOp.getResults()) {
+        unsigned rank = emitNestedLoopHeader(result);
+        indent();
+        emitValue(result, rank);
+        os << " = ";
+        emitValue(op.getOperand(resultIdx++), rank);
+        os << ";";
+        emitInfoAndNewLine(op);
+        emitNestedLoopFooter(rank);
+      }
+    }
+    if (!parentOp.getRegionIterArgs().empty()) {
+      unsigned initArgIdx = 0;
+      for (auto initArg : parentOp.getRegionIterArgs()) {
+        unsigned rank = emitNestedLoopHeader(initArg);
+        indent();
+        emitValue(initArg, rank);
+        os << " = ";
+        emitValue(op.getOperand(initArgIdx++), rank);
+        os << ";";
+        emitInfoAndNewLine(op);
+        emitNestedLoopFooter(rank);
+      }
     }
   }
 
   if (auto parentOp = dyn_cast<scf::WhileOp>(op->getParentOp())) {
-    unsigned resultIdx = 0;
-    for (auto result : parentOp.getResults()) {
-      if (resultIdx >= op.getNumOperands()) {
-        break;
+    if (parentOp.getNumResults() != 0) {
+      unsigned resultIdx = 0;
+      for (auto result : parentOp.getResults()) {
+        unsigned rank = emitNestedLoopHeader(result);
+        indent();
+        emitValue(result, rank);
+        os << " = ";
+        emitValue(op.getOperand(resultIdx++), rank);
+        os << ";";
+        emitInfoAndNewLine(op);
+        emitNestedLoopFooter(rank);
       }
-
-      unsigned rank = emitNestedLoopHeader(result);
-      indent();
-      emitValue(result, rank);
-      os << " = ";
-      emitValue(op.getOperand(resultIdx++), rank);
-      os << ";";
-      emitInfoAndNewLine(op);
-      emitNestedLoopFooter(rank);
     }
   }
 }
@@ -2066,9 +2070,7 @@ void ModuleEmitter::emitBlock(Block &block) {
     // 确保操作数已声明
     for (auto val : op.getOperands()) {
       if (!isDeclared(val)) {
-        indent();
-        emitValue(val); // 声明变量
-        os << ";\n";
+        emitError(&op, "OP Operands is not declared!");
       }
     }
   
