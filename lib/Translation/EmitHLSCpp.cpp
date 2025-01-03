@@ -1050,6 +1050,7 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
 void ModuleEmitter::emitScfFor(scf::ForOp op) {
   // Declare all values returned by scf::YieldOp.
   if (op.getNumResults() != 0) {
+    unsigned resultIdx = 0;
     for (auto result : op.getResults()) {
       if (!isDeclared(result)) {
         indent();
@@ -1057,7 +1058,10 @@ void ModuleEmitter::emitScfFor(scf::ForOp op) {
           emitArrayDecl(result);
         else
           emitValue(result);
-        os << "; // yield value \n";
+        os << " = ";
+        emitValue(op.getIterOperands()[resultIdx]);
+        os << "; // Yield value";
+        emitInfoAndNewLine(op);
       }
     }
   }
