@@ -839,7 +839,7 @@ void ModuleEmitter::emitUndefOp(UndefOpType op) {
   unsigned rank = emitNestedLoopHeader(op.getResult());
   indent();
   emitValue(op.getResult(), rank);
-  os << ";";
+  os << " = 0; // Undef value";
   emitInfoAndNewLine(op);
   emitNestedLoopFooter(rank);
 }
@@ -927,11 +927,11 @@ void ModuleEmitter::emitCall(func::CallOp op) {
 
 /// SCF statement emitters.
 void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
-  // get before Block.
+  // get Block.
   auto &beforeBlock = op.getBefore().front();
+  auto &afterBlock = op.getAfter().front();
 
   // Get Condition operation
-  auto &afterBlock = op.getAfter().front();
   auto condOp = dyn_cast<scf::ConditionOp>(beforeBlock.getTerminator());
   if (!condOp) {
     llvm::errs() << "Condition operation is null!\n";
@@ -939,8 +939,8 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
   }
 
   // Declear all init values of Init region.
+  unsigned initIdx = 0;
   for (auto init : op.getInits()) {
-    unsigned initIdx = 0;
     if (!isDeclared(init)) {
       indent();
       if (init.getType().isa<MemRefType>())
@@ -956,25 +956,27 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
   }
 
   // Declare all values returned by scf::YieldOp.
+  unsigned resultIdx = 0;
   for (auto result : op.getResults()) {
-    unsigned resultIdx = 0;
     if (!isDeclared(result)) {
       indent();
       if (result.getType().isa<MemRefType>())
         emitArrayDecl(result);
       else
         emitValue(result);
-      os << " = ";
-      emitValue(op.getOperand(resultIdx));
-      os << "; // Yield value";
+      if (resultIdx < op.getNumOperands()) {
+        os << " = ";
+        emitValue(op.getOperand(resultIdx));
+      }
+      os << "; // Result value";
       emitInfoAndNewLine(op);
       resultIdx++;
     }
   }
 
   // Declare all values in Before region.
+  initIdx = 0;
   for (auto init : op.getBeforeArguments()) {
-    unsigned initIdx = 0;
     if (!isDeclared(init)) {
       indent();
       if (init.getType().isa<MemRefType>())
@@ -990,41 +992,84 @@ void ModuleEmitter::emitScfWhile(scf::WhileOp op) {
   }
 
   // Declare all values in After region.
+  initIdx = 0;
   for (auto init : op.getAfterArguments()) {
-    unsigned initIdx = 0;
     if (!isDeclared(init)) {
       indent();
       if (init.getType().isa<MemRefType>())
         emitArrayDecl(init);
       else
         emitValue(init);
-      os << " = ";
-      emitValue(op.getOperand(initIdx));
+      if (initIdx < op.getNumOperands()) {
+        os << " = ";
+        emitValue(op.getOperand(initIdx));
+      }
       os << "; // After value";
       emitInfoAndNewLine(op);
       initIdx++;
     }
   }
 
-  // emit the before block.
-  emitBlock(beforeBlock);
+  // Prepare a unique boolean name
+  static int whileCounter = 0;
+  int wID = whileCounter++;
+  std::string condName = "_loopCond" + std::to_string(wID);
 
-  // Emit the while header
-  indent() << "while (";
-  emitValue(condOp.getCondition());
-  os << ") { // Start while loop.";
+  // ====================== do-while ======================
+  indent() << "// Start do-while loop.\n";
+  indent() << "bool " << condName << " = false;\n";
+  indent() << "do {";
   emitInfoAndNewLine(op);
-
   addIndent();
 
-  emitBlock(afterBlock);
-
-  // update the condition variables
+  // 1) emit the beforeBlock as main body + condition
+  indent() << "// Start beforeBlock.\n";
   emitBlock(beforeBlock);
 
-  reduceIndent();
+  // 2) assign cond
+  {
+    // 获取条件值，这通常是某种计算得到的值，比如比较操作的结果
+    auto condValue = condOp.getCondition();
 
-  indent() << "} // End while loop.\n";
+    // 获取循环中的状态信息 (即scf.yield的结果)
+    auto yieldedValues = condOp.getArgs(); // 可能是一个包含多个值的列表
+
+    indent();
+    os << condName << " = (";
+    emitValue(condValue);
+    os << ");\n";
+
+    // 输出条件更新的C语言代码
+    indent();
+    os << "if (" << condName << ") {\n";
+    addIndent();
+    // 输出相关的 yieldedValues 值（例如条件为真时更新的循环状态）
+    for (size_t i = 0; i < yieldedValues.size(); ++i) {
+      // 为每个 yieldedValue 生成代码
+      indent();
+      emitValue(op.getResults()[i]);
+      os << " = ";
+      emitValue(yieldedValues[i]);
+      os << ";\n";
+    }
+
+    // 如果条件不满足，则break退出循环
+    reduceIndent();
+    indent() << "} else {\n";
+    addIndent();
+    indent() << "break; // condition is false => exit loop\n";
+    reduceIndent();
+    indent() << "}\n";
+  }
+
+  // 3) afterBlock
+  indent() << "// Start afterBlock.\n";
+  emitBlock(afterBlock);
+
+  // 4) end of do-while
+  reduceIndent();
+  indent() << "} while(" << condName << "); // End do-while loop.\n";
+
 }
 
 void ModuleEmitter::emitScfFor(scf::ForOp op) {
@@ -1110,8 +1155,6 @@ void ModuleEmitter::emitScfIf(scf::IfOp op) {
           emitArrayDecl(result);
         else
           emitValue(result);
-        // os << " = ";
-        // emitValue(op.getConditionMutable()[resultIdx]);
         os << "; // Yield value";
         emitInfoAndNewLine(op);
         resultIdx++;
@@ -1156,6 +1199,7 @@ void ModuleEmitter::emitScfYield(scf::YieldOp op) {
       emitInfoAndNewLine(op);
       emitNestedLoopFooter(rank);
     }
+    return;
   }
 
   if (auto parentOp = dyn_cast<scf::ForOp>(op->getParentOp())) {
@@ -1185,23 +1229,30 @@ void ModuleEmitter::emitScfYield(scf::YieldOp op) {
         emitNestedLoopFooter(rank);
       }
     }
+    return;
   }
 
   if (auto parentOp = dyn_cast<scf::WhileOp>(op->getParentOp())) {
+    if (!parentOp.getBeforeArguments().empty()) {
+      unsigned initArgIdx = 0;
+      for (auto initArg : parentOp.getBeforeArguments()) {
+        if (initArgIdx >= op.getNumOperands()) {
+          break;
+        }
+        unsigned rank = emitNestedLoopHeader(initArg);
+        indent();
+        emitValue(initArg, rank);
+        os << " = ";
+        emitValue(op.getOperand(initArgIdx++), rank);
+        os << ";// Yield Update Before value";
+        emitInfoAndNewLine(op);
+        emitNestedLoopFooter(rank);
+      }
+    }
     if (parentOp.getNumResults() != 0) {
       unsigned resultIdx = 0;
       for (auto result : parentOp.getResults()) {
         if (resultIdx >= op.getNumOperands()) {
-          emitError(op, Twine("Result Index: ") + Twine(resultIdx) +
-                        Twine(", Operand Numbers: ") +
-                        Twine(op.getNumOperands()) +
-                        Twine(", Parent Op: ") +
-                        Twine(parentOp.getOperationName()));
-          continue;
-        }
-
-        if (!isDeclared(op.getOperand(resultIdx))) {
-          emitError(op, "OP Operands[%d] not declared!, resultIdx");
           break;
         }
 
@@ -1210,43 +1261,72 @@ void ModuleEmitter::emitScfYield(scf::YieldOp op) {
         emitValue(result, rank);
         os << " = ";
         emitValue(op.getOperand(resultIdx), rank);
-        os << ";";
+        os << "; // Yield Update Result value";
         emitInfoAndNewLine(op);
         emitNestedLoopFooter(rank);
         resultIdx++;
       }
     }
-    if (!parentOp.getBeforeArguments().empty()) {
-      unsigned initArgIdx = 0;
-      for (auto initArg : parentOp.getBeforeArguments()) {
-        unsigned rank = emitNestedLoopHeader(initArg);
-        indent();
-        emitValue(initArg, rank);
-        os << " = ";
-        emitValue(op.getOperand(initArgIdx++), rank);
-        os << ";";
-        emitInfoAndNewLine(op);
-        emitNestedLoopFooter(rank);
-      }
-    }
     if (!parentOp.getAfterArguments().empty()) {
       unsigned initArgIdx = 0;
       for (auto initArg : parentOp.getAfterArguments()) {
+        if (initArgIdx >= op.getNumOperands()) {
+          break;
+        }
         unsigned rank = emitNestedLoopHeader(initArg);
         indent();
         emitValue(initArg, rank);
         os << " = ";
         emitValue(op.getOperand(initArgIdx++), rank);
-        os << ";";
+        os << "; // Yield Update After value";
         emitInfoAndNewLine(op);
         emitNestedLoopFooter(rank);
       }
     }
+    return;
   }
 }
 
 /// Affine statement emitters.
 void ModuleEmitter::emitAffineFor(AffineForOp op) {
+  // Declare all values returned by YieldOp.
+  if (op.getNumResults() != 0) {
+    unsigned resultIdx = 0;
+    for (auto result : op.getResults()) {
+      if (!isDeclared(result)) {
+        indent();
+        if (result.getType().isa<MemRefType>())
+          emitArrayDecl(result);
+        else
+          emitValue(result);
+        os << " = ";
+        emitValue(op.getIterOperands()[resultIdx]);
+        os << "; // Yield value";
+        emitInfoAndNewLine(op);
+        resultIdx++;
+      }
+    }
+  }
+
+  // Handle iter_args if present.
+  if (!op.getIterOperands().empty()) {
+    for (unsigned i = 0; i < op.getIterOperands().size(); ++i) {
+      auto iterResult = op.getRegionIterArgs()[i];
+      auto iterOperand = op.getIterOperands()[i];
+
+      if (!isDeclared(iterOperand)) {
+        emitError(op, "OP initOperands[i] not declared!.");
+        break;
+      }
+      indent();
+      emitValue(iterResult);
+      os << " = ";
+      emitValue(iterOperand);
+      os << ";";
+      emitInfoAndNewLine(op);
+    }
+  }
+
   indent() << "for (";
   auto iterVar = op.getInductionVar();
 
@@ -1298,28 +1378,6 @@ void ModuleEmitter::emitAffineFor(AffineForOp op) {
   addIndent();
 
   emitLoopDirectives(op);
-
-  // Handle iter_args if present.
-  if (!op.getIterOperands().empty()) {
-    for (unsigned i = 0; i < op.getIterOperands().size(); ++i) {
-      auto iterOperand = op.getIterOperands()[i];
-      auto iterResult = op.getRegionIterArgs()[i];
-      if (!isDeclared(iterOperand)) {
-        indent();
-        if (iterOperand.getType().isa<MemRefType>())
-          emitArrayDecl(iterOperand);
-        else
-          emitValue(iterOperand);
-        os << ";\n";
-      }
-      indent();
-      emitValue(iterResult);
-      os << " = ";
-      emitValue(iterOperand);
-      os << ";";
-      emitInfoAndNewLine(op);
-    }
-  }
 
   emitBlock(*op.getBody());
   reduceIndent();
